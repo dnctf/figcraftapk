@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Branch/tag FigCraft yang akan dibuild"
+        description: "FigCraft branch/tag"
         required: true
         default: "main"
         type: string
 
       build_mode:
-        description: "APK build mode"
+        description: "Build mode"
         required: true
         default: "release"
         type: choice
@@ -25,7 +25,7 @@ on:
         type: string
 
       app_name:
-        description: "Nama aplikasi Android"
+        description: "Application name"
         required: true
         default: "FigCraft"
         type: string
@@ -41,6 +41,8 @@ env:
   ANDROID_API: "35"
   ANDROID_BUILD_TOOLS: "35.0.0"
   ANDROID_NDK: "27.2.12479018"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
 
 jobs:
 
@@ -54,21 +56,33 @@ jobs:
 
     steps:
 
-      # ---------------------------------------------------------
-      # 1. Checkout fork FigCraft
-      # ---------------------------------------------------------
+      # =========================================================
+      # SOURCE
+      # =========================================================
 
       - name: Checkout FigCraft fork
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ---------------------------------------------------------
-      # 2. Basic dependencies
-      # ---------------------------------------------------------
-
-      - name: Install system dependencies
+      - name: Show repository
         run: |
+          echo "Repository:"
+          echo "${{ github.repository }}"
+
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo "Branch:"
+          git branch --show-current
+
+      # =========================================================
+      # LINUX DEPENDENCIES
+      # =========================================================
+
+      - name: Install dependencies
+        run: |
+
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -88,36 +102,40 @@ jobs:
             file \
             jq
 
-      # ---------------------------------------------------------
-      # 3. Java
-      # ---------------------------------------------------------
+      # =========================================================
+      # JAVA
+      # =========================================================
 
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
 
-      # ---------------------------------------------------------
-      # 4. Rust
-      # ---------------------------------------------------------
+      - name: Check Java
+        run: |
+          java -version
 
-      - name: Setup Rust stable
+      # =========================================================
+      # RUST
+      # =========================================================
+
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
           components: rustfmt, clippy
 
-      - name: Show Rust version
+      - name: Check Rust
         run: |
           rustc --version
           cargo --version
-          rustup show
 
-      # ---------------------------------------------------------
-      # 5. Cargo cache
-      # ---------------------------------------------------------
+          rustup target list --installed
+
+      # =========================================================
+      # CARGO CACHE
+      # =========================================================
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -126,19 +144,18 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-          key: |
-            cargo-android-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-android-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-android-${{ runner.os }}-
 
-      # ---------------------------------------------------------
-      # 6. Android SDK
-      # ---------------------------------------------------------
+      # =========================================================
+      # ANDROID SDK
+      # =========================================================
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK components
+      - name: Install Android SDK
         run: |
 
           sdkmanager \
@@ -149,24 +166,18 @@ jobs:
 
           yes | sdkmanager --licenses || true
 
-      # ---------------------------------------------------------
-      # 7. Environment
-      # ---------------------------------------------------------
-
-      - name: Configure Android environment
+      - name: Check Android
         run: |
+
+          adb version || true
 
           echo "ANDROID_HOME=$ANDROID_HOME"
 
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
-          if [ -n "${ANDROID_NDK_HOME:-}" ]; then
-            echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-          fi
-
-      # ---------------------------------------------------------
-      # 8. Install cargo-ndk
-      # ---------------------------------------------------------
+      # =========================================================
+      # CARGO NDK
+      # =========================================================
 
       - name: Install cargo-ndk
         run: |
@@ -177,11 +188,11 @@ jobs:
 
           cargo ndk --version
 
-      # ---------------------------------------------------------
-      # 9. Checkout Android builder
-      # ---------------------------------------------------------
+      # =========================================================
+      # ANDROID BUILDER
+      # =========================================================
 
-      - name: Checkout ArtCraft Android builder
+      - name: Checkout ArtCraft Android Builder
         uses: actions/checkout@v4
         with:
           repository: MostafaXS1/artcraft-android
@@ -189,15 +200,15 @@ jobs:
           path: android-builder
           fetch-depth: 1
 
-      # ---------------------------------------------------------
-      # 10. Point builder to THIS fork
-      # ---------------------------------------------------------
+      # =========================================================
+      # CONFIGURE BUILDER
+      # =========================================================
 
-      - name: Configure builder for this FigCraft fork
-        env:
-          FORK_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}.git
-          FORK_ORIGIN: ${{ github.server_url }}/${{ github.repository }}
+      - name: Configure FigCraft fork
         working-directory: android-builder
+        env:
+          FIGCRAFT_REPO: https://github.com/${{ github.repository }}.git
+          FIGCRAFT_ORIGIN: https://github.com/${{ github.repository }}
         run: |
 
           python3 <<'PY'
@@ -207,30 +218,34 @@ jobs:
 
           path = Path("lib/build-common.sh")
 
+          if not path.exists():
+              raise SystemExit(
+                  "Android builder structure changed: "
+                  "lib/build-common.sh not found."
+              )
+
           text = path.read_text()
 
-          old_repo = 'REPO="https://github.com/storytold/$APP.git"'
+          old_repo = \
+              'REPO="https://github.com/storytold/$APP.git"'
 
-          new_repo = (
-              'REPO="${FIGCRAFT_REPO_URL:-'
-              'https://github.com/storytold/$APP.git}"'
-          )
+          new_repo = \
+              'REPO="${FIGCRAFT_REPO_URL:-https://github.com/storytold/$APP.git}"'
 
-          old_origin = 'APP_ORIGIN="https://github.com/storytold/$APP"'
+          old_origin = \
+              'APP_ORIGIN="https://github.com/storytold/$APP"'
 
-          new_origin = (
-              'APP_ORIGIN="${FIGCRAFT_APP_ORIGIN:-'
-              'https://github.com/storytold/$APP}"'
-          )
+          new_origin = \
+              'APP_ORIGIN="${FIGCRAFT_APP_ORIGIN:-https://github.com/storytold/$APP}"'
 
           if old_repo not in text:
               raise SystemExit(
-                  "Could not locate REPO definition in Android builder."
+                  "REPO definition was not found."
               )
 
           if old_origin not in text:
               raise SystemExit(
-                  "Could not locate APP_ORIGIN definition in Android builder."
+                  "APP_ORIGIN definition was not found."
               )
 
           text = text.replace(
@@ -248,98 +263,82 @@ jobs:
           path.write_text(text)
 
           print(
-              "FigCraft repository:",
-              os.environ["FORK_REPOSITORY"]
-          )
-
-          print(
-              "FigCraft origin:",
-              os.environ["FORK_ORIGIN"]
+              "Configured repository:",
+              os.environ["FIGCRAFT_REPO"]
           )
 
           PY
 
-      # ---------------------------------------------------------
-      # 11. Build FigCraft
-      # ---------------------------------------------------------
+      # =========================================================
+      # BUILD
+      # =========================================================
 
       - name: Build FigCraft Android
         working-directory: android-builder
         env:
-          FIGCRAFT_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          FIGCRAFT_APP_ORIGIN: ${{ github.server_url }}/${{ github.repository }}
+          FIGCRAFT_REPO_URL: https://github.com/${{ github.repository }}.git
+          FIGCRAFT_APP_ORIGIN: https://github.com/${{ github.repository }}
         run: |
 
           chmod +x build.sh
-          chmod +x build-debug.sh
 
-          SOURCE_REF="${{ inputs.source_ref }}"
+          REF="${{ inputs.source_ref }}"
 
-          if [ -z "$SOURCE_REF" ]; then
-            SOURCE_REF="main"
-          fi
-
-          BUILD_MODE="${{ inputs.build_mode }}"
-
-          if [ -z "$BUILD_MODE" ]; then
-            BUILD_MODE="release"
+          if [ -z "$REF" ]; then
+            REF="main"
           fi
 
           echo "======================================"
-          echo "FigCraft Android Build"
+          echo "FigCraft Android"
           echo "======================================"
 
           echo "Repository:"
           echo "$FIGCRAFT_REPO_URL"
 
-          echo "Source:"
-          echo "$SOURCE_REF"
-
-          echo "Mode:"
-          echo "$BUILD_MODE"
-
-          echo "Package:"
-          echo "${{ inputs.package_name }}"
+          echo "Ref:"
+          echo "$REF"
 
           echo "======================================"
 
-          if [ "$SOURCE_REF" = "main" ]; then
+          if [ "$REF" = "main" ]; then
 
-            SOURCE_OPTION="-main"
+            REF_OPTION="-main"
 
-          elif [ "$SOURCE_REF" = "stable" ]; then
+          elif [ "$REF" = "stable" ]; then
 
-            SOURCE_OPTION="-stable"
+            REF_OPTION="-stable"
 
           else
 
-            SOURCE_OPTION="-branch=$SOURCE_REF"
+            REF_OPTION="-branch=$REF"
 
           fi
 
-          if [ "$BUILD_MODE" = "debug" ]; then
+          if [ "${{ inputs.build_mode }}" = "debug" ]; then
 
-            bash build-debug.sh \
+            chmod +x build-debug.sh
+
+            ./build-debug.sh \
               -figcraft \
-              "$SOURCE_OPTION" \
+              "$REF_OPTION" \
               "-appname=${{ inputs.app_name }}" \
               "-packagename=${{ inputs.package_name }}"
 
           else
 
-            bash build.sh \
+            ./build.sh \
               -figcraft \
-              "$SOURCE_OPTION" \
+              "$REF_OPTION" \
               "-appname=${{ inputs.app_name }}" \
               "-packagename=${{ inputs.package_name }}"
 
           fi
 
-      # ---------------------------------------------------------
-      # 12. Locate APK
-      # ---------------------------------------------------------
+      # =========================================================
+      # APK
+      # =========================================================
 
-      - name: Find generated APK
+      - name: Find APK
         id: apk
         working-directory: android-builder
         run: |
@@ -348,71 +347,68 @@ jobs:
 
           mkdir -p verified
 
-          APK="$(find output -type f -name '*.apk' | head -n 1)"
+          APK=$(find output \
+            -type f \
+            -name "*.apk" \
+            | head -n 1)
 
           if [ -z "$APK" ]; then
 
-            echo "ERROR: APK was not generated."
+            echo "APK was not generated."
 
-            echo ""
-            echo "Output directory:"
-            find output -maxdepth 3 -type f -print || true
-
-            echo ""
-            echo "Build logs:"
-            find logs -maxdepth 2 -type f -print || true
+            find . \
+              -maxdepth 5 \
+              -type f \
+              \( \
+                -name "*.apk" \
+                -o \
+                -name "*.log" \
+              \) \
+              -print
 
             exit 1
 
           fi
 
-          echo "APK found:"
+          echo "APK:"
           echo "$APK"
 
           cp "$APK" verified/
 
-          echo "apk=$APK" >> "$GITHUB_OUTPUT"
-
-      # ---------------------------------------------------------
-      # 13. Validate APK
-      # ---------------------------------------------------------
+      # =========================================================
+      # VALIDATE
+      # =========================================================
 
       - name: Validate APK
         working-directory: android-builder
         run: |
 
-          set -e
+          APK=$(find verified \
+            -type f \
+            -name "*.apk" \
+            | head -n 1)
 
-          APK="$(find verified -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
 
-          echo "Validating:"
-          echo "$APK"
+          SIZE=$(stat -c%s "$APK")
 
-          FILE_SIZE=$(stat -c%s "$APK")
+          echo "APK size: $SIZE bytes"
 
-          echo "APK size:"
-          echo "$FILE_SIZE bytes"
-
-          if [ "$FILE_SIZE" -lt 1000000 ]; then
-
-            echo "ERROR: APK is suspiciously small."
-
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "APK is suspiciously small."
             exit 1
-
           fi
 
           unzip -tq "$APK"
 
-          echo "APK ZIP integrity: OK"
-
           sha256sum "$APK" \
             > verified/SHA256SUMS.txt
 
-      # ---------------------------------------------------------
-      # 14. Upload APK
-      # ---------------------------------------------------------
+      # =========================================================
+      # ARTIFACT
+      # =========================================================
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: figcraft-android-${{ inputs.build_mode }}
@@ -422,16 +418,17 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # ---------------------------------------------------------
-      # 15. Upload logs if build failed
-      # ---------------------------------------------------------
+      # =========================================================
+      # DEBUG LOG
+      # =========================================================
 
-      - name: Upload build logs
+      - name: Upload builder logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: figcraft-android-build-logs
+          name: figcraft-android-debug
           path: |
-            android-builder/logs/**
+            android-builder/logs/
+            android-builder/output/
           if-no-files-found: warn
           retention-days: 14
