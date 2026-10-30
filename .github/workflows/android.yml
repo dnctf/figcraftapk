@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Sumber: stable | main | tag (mis. v0.12.1) | nama branch"
+        description: "Sumber: stable | main | tag (mis. v0.5.1) | nama branch"
         required: true
-        default: "stable"
+        default: "v0.5.1"
         type: string
       build_mode:
         description: "Build mode"
@@ -136,7 +136,7 @@ jobs:
             figcraft-android-${{ runner.os }}-
 
       # Source FigCraft TIDAK perlu di-checkout di sini: builder meng-clone
-      # fork ini sendiri lewat FIGCRAFT_REPO_URL.
+      # repo sumber lewat FIGCRAFT_REPO_URL.
       - name: Checkout ArtCraft Android Builder
         uses: actions/checkout@v6
         with:
