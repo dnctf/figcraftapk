@@ -1,44 +1,277 @@
-name: Build FigCraft APK
+name: Build FigCraft Android APK
 
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Sumber: stable | main | tag (mis. v0.12.1) | nama branch"
+        required: true
+        default: "stable"
+        type: string
+      build_mode:
+        description: "Build mode"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+      package_name:
+        description: "Android package name"
+        required: true
+        default: "com.artcraft.figcraft"
+        type: string
+      app_name:
+        description: "Application name"
+        required: true
+        default: "FigCraft"
+        type: string
+      builder_ref:
+        description: "Branch/commit/tag MostafaXS1/artcraft-android"
+        required: true
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: figcraft-android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  # Fork ini (dnctf/figcraftapk) dipakai builder sebagai sumber source.
+  FIGCRAFT_REPO_URL: https://github.com/${{ github.repository }}.git
+  FIGCRAFT_APP_ORIGIN: https://github.com/${{ github.repository }}
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    name: Build FigCraft Android ARM64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
 
-      - name: Set up Python
+    steps:
+      - name: Validate inputs
+        shell: bash
+        env:
+          IN_REF: ${{ inputs.source_ref }}
+          IN_PKG: ${{ inputs.package_name }}
+          IN_APP: ${{ inputs.app_name }}
+          IN_BUILDER: ${{ inputs.builder_ref }}
+        run: |
+          set -Eeuo pipefail
+          [ -n "$IN_REF" ] || { echo "::error::source_ref kosong"; exit 1; }
+          [ -n "$IN_APP" ] || { echo "::error::app_name kosong"; exit 1; }
+          [ -n "$IN_BUILDER" ] || { echo "::error::builder_ref kosong"; exit 1; }
+          if ! [[ "$IN_PKG" =~ ^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$ ]]; then
+            echo "::error::package_name tidak valid: $IN_PKG"
+            exit 1
+          fi
+
+      # Hanya hapus yang pasti tidak dipakai. SDK/NDK bawaan runner DIBIARKAN
+      # karena builder mencarinya sendiri.
+      - name: Free disk space
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY/CodeQL" || true
+          df -h /
+
+      - name: Install Linux dependencies
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl unzip zip xz-utils build-essential pkg-config \
+            libssl-dev clang cmake ninja-build file jq patchelf lld
+
+      - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.12"
 
-      - name: Set up JDK 17
+      - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: "21"
 
-      - name: Install dependencies
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Cargo and Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: figcraft-android-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            figcraft-android-${{ runner.os }}-
+
+      # Source FigCraft TIDAK perlu di-checkout di sini: builder meng-clone
+      # fork ini sendiri lewat FIGCRAFT_REPO_URL.
+      - name: Checkout ArtCraft Android Builder
+        uses: actions/checkout@v6
+        with:
+          repository: MostafaXS1/artcraft-android
+          ref: ${{ inputs.builder_ref }}
+          path: android-builder
+          fetch-depth: 1
+
+      - name: Patch builder to use this fork
+        working-directory: android-builder
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install flet
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          set -Eeuo pipefail
 
-      # Otomatis mengirim input "y" (yes) pada prompt instalasi Flutter SDK Flet
+          for f in build.sh build-debug.sh lib/build-common.sh; do
+            test -f "$f" || { echo "::error::$f tidak ada di builder"; exit 1; }
+          done
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("lib/build-common.sh")
+          t = p.read_text()
+
+          reps = [
+              ('REPO="https://github.com/storytold/$APP.git"',
+               'REPO="${FIGCRAFT_REPO_URL:-https://github.com/storytold/$APP.git}"'),
+              ('APP_ORIGIN="https://github.com/storytold/$APP"',
+               'APP_ORIGIN="${FIGCRAFT_APP_ORIGIN:-https://github.com/storytold/$APP}"'),
+          ]
+          for old, new in reps:
+              if old in t:
+                  t = t.replace(old, new)
+          p.write_text(t)
+
+          if "FIGCRAFT_REPO_URL" not in t:
+              raise SystemExit(
+                  "ERROR: builder tidak bisa dipatch (baris REPO= tidak ditemukan). "
+                  "Build akan memakai storytold/figcraft, bukan fork ini."
+              )
+          print("Builder dipatch untuk fork ini.")
+          PY
+
+          grep -n -E 'REPO=|APP_ORIGIN=' lib/build-common.sh || true
+          echo "Builder commit: $(git rev-parse HEAD)"
+
       - name: Build FigCraft Android
-        working-directory: ${{ github.workspace }}
-        run: yes | flet build apk -v
+        id: build
+        working-directory: android-builder
+        shell: bash
+        env:
+          IN_REF: ${{ inputs.source_ref }}
+          IN_MODE: ${{ inputs.build_mode }}
+          IN_PKG: ${{ inputs.package_name }}
+          IN_APP: ${{ inputs.app_name }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p logs output source
+
+          # Pastikan tidak ada checkout lama.
+          rm -rf source/figcraft source/.clone-figcraft.* build/figcraft
+
+          case "$IN_REF" in
+            stable)       REF_OPTION="-stable" ;;
+            main|latest)  REF_OPTION="-main" ;;
+            v[0-9]*)      REF_OPTION="-tag=$IN_REF" ;;
+            *)            REF_OPTION="-branch=$IN_REF" ;;
+          esac
+
+          if [ "$IN_MODE" = "debug" ]; then SCRIPT=build-debug.sh; else SCRIPT=build.sh; fi
+
+          echo "Repo    : $FIGCRAFT_REPO_URL"
+          echo "Option  : $REF_OPTION"
+          echo "App     : $IN_APP"
+          echo "Package : $IN_PKG"
+          echo "Mode    : $IN_MODE"
+
+          set +e
+          bash "$SCRIPT" -figcraft "$REF_OPTION" \
+            "-appname=$IN_APP" "-packagename=$IN_PKG" \
+            2>&1 | tee logs/runner-build.log
+          RC=${PIPESTATUS[0]}
+          set -e
+
+          echo "Builder exit code: $RC"
+          exit "$RC"
+
+      # Menampilkan ERROR PERTAMA, bukan 250 baris terakhir
+      # (baris terakhir biasanya hanya akibat, bukan penyebab).
+      - name: Show first errors
+        if: failure() && steps.build.outcome == 'failure'
+        working-directory: android-builder
+        shell: bash
+        run: |
+          for f in logs/*.log; do
+            [ -f "$f" ] || continue
+            echo "::group::First errors in $f"
+            grep -n -i -m 3 -B 8 -A 30 -E \
+              'error\[E[0-9]+\]|^error(:| )|Traceback|What went wrong|panicked at|ERROR:|FAILURE:|fatal:|cannot find|not found' \
+              "$f" || echo "(tidak ada pola error yang cocok)"
+            echo "::endgroup::"
+          done
+          echo "::group::Last 80 lines"
+          tail -n 80 logs/runner-build.log || true
+          echo "::endgroup::"
+
+      - name: Find and validate APK
+        id: apk
+        working-directory: android-builder
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p verified
+
+          APK="$(find output -type f -name '*.apk' | sort | head -n 1 || true)"
+          if [ -z "$APK" ]; then
+            echo "::error::Tidak ada APK di output/"
+            find . -type f -name '*.apk' -print || true
+            exit 1
+          fi
+
+          cp "$APK" "verified/$(basename "$APK")"
+          APK="verified/$(basename "$APK")"
+
+          ls -lh "$APK"
+          SIZE="$(stat -c%s "$APK")"
+          [ "$SIZE" -ge 1000000 ] || { echo "::error::APK terlalu kecil ($SIZE byte)"; exit 1; }
+
+          unzip -tq "$APK"
+          if unzip -l "$APK" | grep -q 'lib/arm64-v8a/'; then
+            echo "ARM64 native libs: OK"
+          else
+            echo "::warning::lib/arm64-v8a tidak ditemukan di APK"
+          fi
+
+          (cd verified && sha256sum "$(basename "$APK")" | tee SHA256SUMS.txt)
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
         if: success()
+        uses: actions/upload-artifact@v6
         with:
-          name: figcraft-android-apk
-          path: build/apk/**/*.apk
+          name: figcraft-android-${{ inputs.build_mode }}-arm64
+          path: |
+            android-builder/verified/*.apk
+            android-builder/verified/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: figcraft-android-logs
+          path: android-builder/logs/**
+          if-no-files-found: warn
+          retention-days: 14
