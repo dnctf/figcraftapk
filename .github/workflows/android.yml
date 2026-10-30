@@ -1,63 +1,50 @@
-name: Build Android
+name: Build FigCraft APK
 
 on:
   push:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Mengizinkan eksekusi manual
+  workflow_dispatch:
 
 jobs:
-  build-android:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Menarik source code FigCraft ke dalam runner (Solusi utama untuk error exit 1)
+      # 1. Menarik source code dari repositori ke dalam runner
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive # Penting jika repositori menggunakan submodule
 
-      # 2. Menyiapkan Java (Syarat wajib untuk environment Android SDK/NDK)
+      # 2. Menyiapkan environment Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. Menyiapkan Java (Wajib untuk kompilasi Android/APK)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # 3. Menyiapkan Python (Untuk menjalankan skrip builder eksternal)
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11' # Sesuaikan dengan versi yang didukung skrip Anda
-
-      # 4. Menyiapkan Rust & Target Android (Karena FigCraft berbasis Rust)
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android
-
-      # 5. Instalasi dependensi Python jika diperlukan skrip builder
-      - name: Install Python dependencies
+      # 4. Menginstal Flet dan dependensi Python proyek Anda
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # pip install -r requirements.txt (Hapus tanda # jika ada file requirements)
+          pip install flet
+          # Menginstal dependensi tambahan jika ada file requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # 6. Eksekusi skrip builder
+      # 5. Mengeksekusi proses build APK menggunakan Flet
       - name: Build FigCraft Android
         working-directory: ${{ github.workspace }}
-        env:
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
-        run: |
-          # Ganti 'build_script.py' dengan nama dan path file asli milik FigCraft
-          python build_script.py
-          
-      # 7. Upload hasil APK sebagai artifact agar bisa diunduh
+        run: flet build apk
+
+      # 6. Mengunggah file APK yang sudah jadi agar bisa Anda unduh
       - name: Upload APK
         uses: actions/upload-artifact@v4
         if: success()
         with:
           name: figcraft-android-apk
-          path: '**/*.apk' # Secara otomatis mencari file APK yang dihasilkan
+          path: build/apk/**/*.apk
