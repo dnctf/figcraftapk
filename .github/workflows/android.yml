@@ -26,6 +26,11 @@ on:
         required: true
         default: "FigCraft"
         type: string
+      source_repo:
+        description: "Repo source FigCraft (owner/nama). Default: upstream storytold/figcraft"
+        required: true
+        default: "storytold/figcraft"
+        type: string
       builder_ref:
         description: "Branch/commit/tag MostafaXS1/artcraft-android"
         required: true
@@ -42,9 +47,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  # Fork ini (dnctf/figcraftapk) dipakai builder sebagai sumber source.
-  FIGCRAFT_REPO_URL: https://github.com/${{ github.repository }}.git
-  FIGCRAFT_APP_ORIGIN: https://github.com/${{ github.repository }}
+  # Repo sumber yang di-clone builder (input source_repo).
+  FIGCRAFT_REPO_URL: https://github.com/${{ inputs.source_repo }}.git
+  FIGCRAFT_APP_ORIGIN: https://github.com/${{ inputs.source_repo }}
 
 jobs:
   build:
@@ -60,8 +65,13 @@ jobs:
           IN_PKG: ${{ inputs.package_name }}
           IN_APP: ${{ inputs.app_name }}
           IN_BUILDER: ${{ inputs.builder_ref }}
+          IN_REPO: ${{ inputs.source_repo }}
         run: |
           set -Eeuo pipefail
+          if ! [[ "$IN_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::source_repo harus berformat owner/nama: $IN_REPO"
+            exit 1
+          fi
           [ -n "$IN_REF" ] || { echo "::error::source_ref kosong"; exit 1; }
           [ -n "$IN_APP" ] || { echo "::error::app_name kosong"; exit 1; }
           [ -n "$IN_BUILDER" ] || { echo "::error::builder_ref kosong"; exit 1; }
@@ -135,7 +145,7 @@ jobs:
           path: android-builder
           fetch-depth: 1
 
-      - name: Patch builder to use this fork
+      - name: Patch builder to use source_repo
         working-directory: android-builder
         shell: bash
         run: |
@@ -165,9 +175,9 @@ jobs:
           if "FIGCRAFT_REPO_URL" not in t:
               raise SystemExit(
                   "ERROR: builder tidak bisa dipatch (baris REPO= tidak ditemukan). "
-                  "Build akan memakai storytold/figcraft, bukan fork ini."
+                  "Build akan memakai storytold/figcraft, bukan source_repo."
               )
-          print("Builder dipatch untuk fork ini.")
+          print("Builder dipatch untuk source_repo.")
           PY
 
           grep -n -E 'REPO=|APP_ORIGIN=' lib/build-common.sh || true
