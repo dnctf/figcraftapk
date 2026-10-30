@@ -1,135 +1,63 @@
-name: Build FigCraft Android APK
+name: Build Android
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      source_ref:
-        description: "FigCraft branch/tag/commit yang akan dibuild"
-        required: true
-        default: "main"
-        type: string
-      build_mode:
-        description: "Build mode"
-        required: true
-        default: "release"
-        type: choice
-        options:
-          - release
-          - debug
-      package_name:
-        description: "Android package name"
-        required: true
-        default: "com.artcraft.figcraft"
-        type: string
-      app_name:
-        description: "Application name"
-        required: true
-        default: "FigCraft"
-        type: string
-
-permissions:
-  contents: read
-
-concurrency:
-  group: figcraft-android-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Mengizinkan eksekusi manual
 
 jobs:
   build-android:
-    name: Build FigCraft Android ARM64
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Free disk space
-        shell: bash
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
-            /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY/CodeQL" || true
-
-      - name: Checkout Repository
+      # 1. Menarik source code FigCraft ke dalam runner (Solusi utama untuk error exit 1)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.source_ref || github.ref }}
+          submodules: recursive # Penting jika repositori menggunakan submodule
 
-      - name: Setup Java 21
+      # 2. Menyiapkan Java (Syarat wajib untuk environment Android SDK/NDK)
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          java-version: '17'
           distribution: 'temurin'
-          java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # 3. Menyiapkan Python (Untuk menjalankan skrip builder eksternal)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Sesuaikan dengan versi yang didukung skrip Anda
 
-      - name: Setup Rust
+      # 4. Menyiapkan Rust & Target Android (Karena FigCraft berbasis Rust)
+      - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin
-            target
-          key: cargo-android-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-android-${{ runner.os }}-
+      # 5. Instalasi dependensi Python jika diperlukan skrip builder
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # pip install -r requirements.txt (Hapus tanda # jika ada file requirements)
 
-      - name: Install cargo-apk
-        run: cargo install cargo-apk
-
-      - name: Configure Android Metadata
-        shell: bash
+      # 6. Eksekusi skrip builder
+      - name: Build FigCraft Android
+        working-directory: ${{ github.workspace }}
         env:
-          IN_PKG: ${{ inputs.package_name || 'com.artcraft.figcraft' }}
-          IN_APP: ${{ inputs.app_name || 'FigCraft' }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
         run: |
-          MANIFEST="apps/figcraft/Cargo.toml"
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::warning::apps/figcraft/Cargo.toml tidak ditemukan, menggunakan Cargo.toml root"
-            MANIFEST="Cargo.toml"
-          fi
+          # Ganti 'build_script.py' dengan nama dan path file asli milik FigCraft
+          python build_script.py
           
-          # Menambahkan konfigurasi dinamis berdasarkan input workflow_dispatch
-          cat <<EOF >> "$MANIFEST"
-
-          [package.metadata.android]
-          package = "${IN_PKG}"
-          apk_name = "${IN_APP}"
-          assets = "../../assets"
-          icon = "@mipmap/ic_launcher"
-          EOF
-
-      - name: Build APK (Release)
-        if: ${{ inputs.build_mode == 'release' || github.event_name != 'workflow_dispatch' }}
-        run: |
-          if [ -f "apps/figcraft/Cargo.toml" ]; then
-            cargo apk build --release --manifest-path apps/figcraft/Cargo.toml
-          else
-            cargo apk build --release
-          fi
-
-      - name: Build APK (Debug)
-        if: ${{ inputs.build_mode == 'debug' }}
-        run: |
-          if [ -f "apps/figcraft/Cargo.toml" ]; then
-            cargo apk build --manifest-path apps/figcraft/Cargo.toml
-          else
-            cargo apk build
-          fi
-
-      - name: Upload APK Artifact
+      # 7. Upload hasil APK sebagai artifact agar bisa diunduh
+      - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: success()
         with:
-          name: ${{ inputs.app_name || 'FigCraft' }}-Android-${{ inputs.build_mode || 'release' }}-arm64
-          path: target/**/apk/*.apk
-          if-no-files-found: error
-          retention-days: 30
+          name: figcraft-android-apk
+          path: '**/*.apk' # Secara otomatis mencari file APK yang dihasilkan
