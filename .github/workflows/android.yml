@@ -21,9 +21,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 3. Menyiapkan Java (Wajib untuk kompilasi Android/APK)
+      # 3. Menyiapkan Java (Sudah diperbarui ke v5 agar tidak ada warning)
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -36,10 +36,10 @@ jobs:
           # Menginstal dependensi tambahan jika ada file requirements.txt
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # 5. Mengeksekusi proses build APK menggunakan Flet
+      # 5. Mengeksekusi proses build APK menggunakan Flet (dengan mode verbose)
       - name: Build FigCraft Android
         working-directory: ${{ github.workspace }}
-        run: flet build apk
+        run: flet build apk -v
 
       # 6. Mengunggah file APK yang sudah jadi agar bisa Anda unduh
       - name: Upload APK
