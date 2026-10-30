@@ -1,6 +1,10 @@
 name: Build FigCraft Android APK
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       source_ref:
@@ -34,427 +38,98 @@ concurrency:
   group: figcraft-android-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  ANDROID_API: "35"
-  ANDROID_BUILD_TOOLS: "35.0.0"
-  ANDROID_NDK: "27.2.12479018"
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: "1"
-  FIGCRAFT_REPO_URL: https://github.com/${{ github.repository }}.git
-  FIGCRAFT_APP_ORIGIN: https://github.com/${{ github.repository }}
-
 jobs:
-  build:
+  build-android:
     name: Build FigCraft Android ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 60
 
     steps:
-      # ------------------------------------------------------
-      # Validasi input
-      # ------------------------------------------------------
-      - name: Validate inputs
-        shell: bash
-        env:
-          IN_REF: ${{ inputs.source_ref }}
-          IN_PKG: ${{ inputs.package_name }}
-          IN_APP: ${{ inputs.app_name }}
-        run: |
-          set -Eeuo pipefail
-
-          if [ -z "$IN_REF" ]; then
-            echo "::error::source_ref kosong."
-            exit 1
-          fi
-
-          if ! [[ "$IN_PKG" =~ ^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$ ]]; then
-            echo "::error::package_name tidak valid: $IN_PKG"
-            exit 1
-          fi
-
-          if [ -z "$IN_APP" ]; then
-            echo "::error::app_name kosong."
-            exit 1
-          fi
-
-          echo "Input OK: ref=$IN_REF package=$IN_PKG app=$IN_APP"
-
-      # ------------------------------------------------------
-      # Bersihkan disk runner
-      # ------------------------------------------------------
       - name: Free disk space
         shell: bash
         run: |
-          set -x
-          df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
             /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY/CodeQL" || true
-          df -h /
 
-      - name: Checkout FigCraft fork
-        uses: actions/checkout@v6
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Show repository information
-        shell: bash
-        run: |
-          echo "Repository : $GITHUB_REPOSITORY"
-          echo "Ref        : $GITHUB_REF"
-          echo "Commit     : $(git rev-parse HEAD)"
-          git status --short || true
-          git branch -a || true
-          git tag --points-at HEAD || true
-
-      - name: Install Linux dependencies
-        shell: bash
-        run: |
-          set -e
-          sudo apt-get update
-          sudo apt-get install -y \
-            git curl wget unzip zip tar gzip xz-utils \
-            build-essential pkg-config libssl-dev \
-            python3 python3-pip python3-venv \
-            clang cmake ninja-build file jq patchelf lld
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Setup Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: "21"
+          distribution: 'temurin'
+          java-version: '21'
 
-      - name: Setup Rust stable
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
-      - name: Verify Rust
-        shell: bash
-        run: |
-          set -e
-          rustc --version
-          cargo --version
-          rustup target list --installed | grep -qx "aarch64-linux-android"
-          echo "ARM64 Android target: OK"
-
       - name: Cache Cargo
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
+            target
           key: cargo-android-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-android-${{ runner.os }}-
 
-      # ------------------------------------------------------
-      # Android SDK / NDK
-      # ------------------------------------------------------
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: "platform-tools"
+      - name: Install cargo-apk
+        run: cargo install cargo-apk
 
-      - name: Install Android SDK and NDK
-        shell: bash
-        run: |
-          set -e
-
-          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          echo "SDK root: $SDK_ROOT"
-
-          yes | sdkmanager --licenses > /tmp/android-licenses.log 2>&1 || true
-
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-${ANDROID_API}" \
-            "build-tools;${ANDROID_BUILD_TOOLS}" \
-            "ndk;${ANDROID_NDK}"
-
-          test -d "$SDK_ROOT/platforms/android-${ANDROID_API}"
-          test -d "$SDK_ROOT/build-tools/${ANDROID_BUILD_TOOLS}"
-          test -d "$SDK_ROOT/ndk/${ANDROID_NDK}"
-
-          {
-            echo "ANDROID_SDK_ROOT=$SDK_ROOT"
-            echo "ANDROID_HOME=$SDK_ROOT"
-            echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/${ANDROID_NDK}"
-            echo "ANDROID_NDK_ROOT=$SDK_ROOT/ndk/${ANDROID_NDK}"
-          } >> "$GITHUB_ENV"
-
-          echo "Android SDK/Build-Tools/NDK: OK"
-
-      - name: Install cargo-ndk
-        shell: bash
-        run: |
-          set -e
-          if ! command -v cargo-ndk >/dev/null 2>&1; then
-            cargo install cargo-ndk --version 4.1.2 --locked
-          fi
-          cargo ndk --version
-
-      # ------------------------------------------------------
-      # Cek source (tidak fatal, builder meng-clone source sendiri)
-      # ------------------------------------------------------
-      - name: Verify FigCraft source
-        shell: bash
-        run: |
-          if [ -f Cargo.toml ]; then
-            echo "Cargo.toml ditemukan di root."
-            cargo metadata --no-deps --format-version 1 > /tmp/figcraft-metadata.json || true
-            jq -r '.packages[] | "package=\(.name) version=\(.version)"' \
-              /tmp/figcraft-metadata.json || true
-          else
-            echo "::warning::Cargo.toml tidak ada di root; builder akan clone source sendiri."
-          fi
-
-      # ------------------------------------------------------
-      # Android builder
-      # ------------------------------------------------------
-      - name: Checkout ArtCraft Android Builder
-        uses: actions/checkout@v6
-        with:
-          repository: MostafaXS1/artcraft-android
-          ref: main
-          path: android-builder
-          fetch-depth: 1
-
-      - name: Verify Android builder
-        shell: bash
-        run: |
-          set -e
-          test -f android-builder/build.sh
-          test -f android-builder/build-debug.sh
-          test -f android-builder/lib/build-common.sh
-          echo "Builder commit: $(git -C android-builder rev-parse HEAD)"
-
-      - name: Configure builder for current fork
-        working-directory: android-builder
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          python3 <<'PY'
-          import os
-          from pathlib import Path
-
-          path = Path("lib/build-common.sh")
-          if not path.exists():
-              raise SystemExit("ERROR: lib/build-common.sh was not found.")
-
-          text = path.read_text()
-
-          old_repo = 'REPO="https://github.com/storytold/$APP.git"'
-          old_origin = 'APP_ORIGIN="https://github.com/storytold/$APP"'
-          new_repo = 'REPO="${FIGCRAFT_REPO_URL:-https://github.com/storytold/$APP.git}"'
-          new_origin = 'APP_ORIGIN="${FIGCRAFT_APP_ORIGIN:-https://github.com/storytold/$APP}"'
-
-          changed = False
-          if old_repo in text:
-              text = text.replace(old_repo, new_repo, 1)
-              changed = True
-          if old_origin in text:
-              text = text.replace(old_origin, new_origin, 1)
-              changed = True
-
-          if changed:
-              path.write_text(text)
-              print("Builder dipatch untuk:", os.environ["FIGCRAFT_REPO_URL"])
-          else:
-              print("WARNING: definisi REPO/APP_ORIGIN tidak ditemukan "
-                    "(sudah dipatch atau struktur builder berubah).")
-          PY
-
-      - name: Inspect builder configuration
-        working-directory: android-builder
-        shell: bash
-        run: |
-          grep -n -E "REPO=|APP_ORIGIN=" lib/build-common.sh || true
-          echo
-          find . -maxdepth 2 -type f \( -name "*.sh" -o -name "*.py" \) -print | sort
-
-      # ------------------------------------------------------
-      # BUILD
-      # ------------------------------------------------------
-      - name: Build FigCraft Android
-        id: build
-        working-directory: android-builder
+      - name: Configure Android Metadata
         shell: bash
         env:
-          IN_REF: ${{ inputs.source_ref }}
-          IN_MODE: ${{ inputs.build_mode }}
-          IN_PKG: ${{ inputs.package_name }}
-          IN_APP: ${{ inputs.app_name }}
-          ARTCRAFT_TARGET_SDK: ${{ env.ANDROID_API }}
-          ARTCRAFT_NDK_VERSION: ${{ env.ANDROID_NDK }}
-          ARTCRAFT_BUILD_TOOLS_VERSION: ${{ env.ANDROID_BUILD_TOOLS }}
+          IN_PKG: ${{ inputs.package_name || 'com.artcraft.figcraft' }}
+          IN_APP: ${{ inputs.app_name || 'FigCraft' }}
         run: |
-          set -Eeuo pipefail
+          MANIFEST="apps/figcraft/Cargo.toml"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::warning::apps/figcraft/Cargo.toml tidak ditemukan, menggunakan Cargo.toml root"
+            MANIFEST="Cargo.toml"
+          fi
+          
+          # Menambahkan konfigurasi dinamis berdasarkan input workflow_dispatch
+          cat <<EOF >> "$MANIFEST"
 
-          mkdir -p logs output source
-          LOG_FILE="$PWD/logs/figcraft-build.log"
+          [package.metadata.android]
+          package = "${IN_PKG}"
+          apk_name = "${IN_APP}"
+          assets = "../../assets"
+          icon = "@mipmap/ic_launcher"
+          EOF
 
-          REF="${IN_REF:-main}"
-
-          echo "=============================================="
-          echo "FIGCRAFT ANDROID BUILD"
-          echo "=============================================="
-          echo "Repository : $FIGCRAFT_REPO_URL"
-          echo "Origin     : $FIGCRAFT_APP_ORIGIN"
-          echo "Ref        : $REF"
-          echo "App        : $IN_APP"
-          echo "Package    : $IN_PKG"
-          echo "Mode       : $IN_MODE"
-          echo "=============================================="
-
-          grep -n -E '^REPO=|^APP_ORIGIN=' lib/build-common.sh || true
-
-          rm -rf source/figcraft source/.clone-figcraft.* build/figcraft
-          rm -rf output/*
-          mkdir -p source output logs
-
-          if [ "$REF" = "main" ]; then
-            REF_OPTION="-main"
-          elif [ "$REF" = "stable" ]; then
-            REF_OPTION="-stable"
+      - name: Build APK (Release)
+        if: ${{ inputs.build_mode == 'release' || github.event_name != 'workflow_dispatch' }}
+        run: |
+          if [ -f "apps/figcraft/Cargo.toml" ]; then
+            cargo apk build --release --manifest-path apps/figcraft/Cargo.toml
           else
-            REF_OPTION="-branch=$REF"
+            cargo apk build --release
           fi
-          echo "Builder source option: $REF_OPTION"
 
-          if [ "$IN_MODE" = "debug" ]; then
-            SCRIPT="./build-debug.sh"
+      - name: Build APK (Debug)
+        if: ${{ inputs.build_mode == 'debug' }}
+        run: |
+          if [ -f "apps/figcraft/Cargo.toml" ]; then
+            cargo apk build --manifest-path apps/figcraft/Cargo.toml
           else
-            SCRIPT="./build.sh"
-          fi
-          chmod +x "$SCRIPT"
-
-          set +e
-          "$SCRIPT" \
-            -figcraft \
-            "$REF_OPTION" \
-            "-appname=$IN_APP" \
-            "-packagename=$IN_PKG" \
-            2>&1 | tee "$LOG_FILE"
-          BUILD_EXIT=${PIPESTATUS[0]}
-          set -e
-
-          echo "Builder exit code: $BUILD_EXIT"
-
-          if [ "$BUILD_EXIT" -ne 0 ]; then
-            echo "::error::Build failed (exit $BUILD_EXIT)"
-            tail -n 250 "$LOG_FILE" || true
-            exit "$BUILD_EXIT"
+            cargo apk build
           fi
 
-          echo "Generated APK candidates:"
-          find . -type f -name "*.apk" -print || true
-
-      # ------------------------------------------------------
-      # INSPECT OUTPUT
-      # ------------------------------------------------------
-      - name: Inspect builder output
-        if: always()
-        working-directory: android-builder
-        shell: bash
-        run: |
-          find . -maxdepth 5 -type f | sort | head -500 || true
-          echo
-          echo "APK files:"
-          find . -type f -name "*.apk" -print || true
-          echo
-          echo "Logs:"
-          find logs -type f -print 2>/dev/null || true
-
-      # ------------------------------------------------------
-      # FIND APK
-      # ------------------------------------------------------
-      - name: Find generated APK
-        id: apk
-        working-directory: android-builder
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          mkdir -p verified
-
-          APK="$(find output -type f -name "*.apk" -print | head -n 1 || true)"
-
-          if [ -z "$APK" ]; then
-            APK="$(find . -path ./verified -prune -o -type f -name "*.apk" -print | head -n 1 || true)"
-          fi
-
-          if [ -z "$APK" ]; then
-            echo "::error::No APK was generated."
-            find . -type f \( -name "*.apk" -o -name "*.aab" -o -name "*.log" \) -print || true
-            exit 1
-          fi
-
-          APK_NAME="$(basename "$APK")"
-          cp "$APK" "verified/$APK_NAME"
-
-          echo "Generated APK: $APK"
-          echo "apk_path=verified/$APK_NAME" >> "$GITHUB_OUTPUT"
-
-      # ------------------------------------------------------
-      # VALIDATE APK
-      # ------------------------------------------------------
-      - name: Validate APK
-        working-directory: android-builder
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          APK="$(find verified -type f -name "*.apk" -print | head -n 1)"
-          [ -n "$APK" ] || { echo "::error::Verified APK not found."; exit 1; }
-
-          file "$APK"
-          ls -lh "$APK"
-
-          SIZE="$(stat -c%s "$APK")"
-          echo "APK size in bytes: $SIZE"
-
-          if [ "$SIZE" -lt 1000000 ]; then
-            echo "::error::APK is suspiciously small."
-            exit 1
-          fi
-
-          unzip -tq "$APK"
-          echo "APK ZIP integrity: OK"
-
-          (cd verified && sha256sum "$(basename "$APK")" | tee SHA256SUMS.txt)
-
-      - name: Check APK native libraries
-        working-directory: android-builder
-        shell: bash
-        run: |
-          APK="$(find verified -type f -name "*.apk" -print | head -n 1)"
-          if unzip -l "$APK" | grep -E "lib/arm64-v8a/|lib/aarch64/"; then
-            echo "ARM64 native libraries: found"
-          else
-            echo "::warning::Tidak ada native library ARM64 di APK."
-          fi
-
-      # ------------------------------------------------------
-      # UPLOAD
-      # ------------------------------------------------------
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v6
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: figcraft-android-${{ inputs.build_mode }}-arm64
-          path: |
-            android-builder/verified/*.apk
-            android-builder/verified/SHA256SUMS.txt
+          name: ${{ inputs.app_name || 'FigCraft' }}-Android-${{ inputs.build_mode || 'release' }}-arm64
+          path: target/**/apk/*.apk
           if-no-files-found: error
           retention-days: 30
-
-      - name: Upload builder diagnostics
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: figcraft-android-diagnostics
-          path: |
-            android-builder/logs/**
-          if-no-files-found: warn
-          retention-days: 14
