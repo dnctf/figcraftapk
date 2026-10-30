@@ -36,6 +36,16 @@ on:
         required: true
         default: "main"
         type: string
+      publish_release:
+        description: "Buat GitHub Release dan unggah APK ke dalamnya"
+        required: true
+        default: true
+        type: boolean
+      release_tag:
+        description: "Tag release (kosongkan = otomatis, mis. android-v0.5.1-12)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -56,6 +66,9 @@ jobs:
     name: Build FigCraft Android ARM64
     runs-on: ubuntu-24.04
     timeout-minutes: 240
+    # contents: write hanya untuk membuat GitHub Release.
+    permissions:
+      contents: write
 
     steps:
       - name: Validate inputs
@@ -66,8 +79,13 @@ jobs:
           IN_APP: ${{ inputs.app_name }}
           IN_BUILDER: ${{ inputs.builder_ref }}
           IN_REPO: ${{ inputs.source_repo }}
+          IN_TAG: ${{ inputs.release_tag }}
         run: |
           set -Eeuo pipefail
+          if [ -n "${IN_TAG:-}" ] && ! [[ "$IN_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::release_tag hanya boleh huruf, angka, titik, minus, underscore: $IN_TAG"
+            exit 1
+          fi
           if ! [[ "$IN_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
             echo "::error::source_repo harus berformat owner/nama: $IN_REPO"
             exit 1
@@ -303,6 +321,58 @@ jobs:
             android-builder/verified/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Create GitHub Release
+        if: success() && inputs.publish_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IN_TAG: ${{ inputs.release_tag }}
+          IN_REF: ${{ inputs.source_ref }}
+          IN_REPO: ${{ inputs.source_repo }}
+          IN_MODE: ${{ inputs.build_mode }}
+          IN_PKG: ${{ inputs.package_name }}
+          IN_APP: ${{ inputs.app_name }}
+        run: |
+          set -Eeuo pipefail
+
+          if [ -n "$IN_TAG" ]; then
+            TAG="$IN_TAG"
+          else
+            TAG="android-${IN_REF}-${GITHUB_RUN_NUMBER}"
+          fi
+
+          BUILDER_SHA="$(git -C android-builder rev-parse --short HEAD)"
+          SHA_LINE="$(cat android-builder/verified/SHA256SUMS.txt)"
+
+          {
+            echo "Build Android (arm64-v8a, ${IN_MODE}) dari **${IN_REPO}** @ \`${IN_REF}\`."
+            echo
+            echo "- Aplikasi: ${IN_APP}"
+            echo "- Package: \`${IN_PKG}\`"
+            echo "- Builder: MostafaXS1/artcraft-android @ \`${BUILDER_SHA}\`"
+            echo "- Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "SHA256:"
+            echo '```'
+            echo "${SHA_LINE}"
+            echo '```'
+            echo
+            echo "Catatan: build tidak resmi, pre-release awal. APK ditandatangani dengan"
+            echo "kunci lokal yang dibuat saat build, jadi uninstall versi lama sebelum"
+            echo "memasang APK dari release lain."
+          } > "$RUNNER_TEMP/release-notes.md"
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "${IN_APP} Android ${IN_REF} (${IN_MODE})" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --prerelease \
+            android-builder/verified/*.apk \
+            android-builder/verified/SHA256SUMS.txt
+
+          echo "Release dibuat: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
 
       - name: Upload build logs
         if: always()
