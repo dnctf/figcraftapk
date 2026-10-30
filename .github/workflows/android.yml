@@ -55,7 +55,7 @@ jobs:
   build:
     name: Build FigCraft Android ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 240
 
     steps:
       - name: Validate inputs
@@ -214,14 +214,33 @@ jobs:
           echo "Package : $IN_PKG"
           echo "Mode    : $IN_MODE"
 
-          set +e
-          bash "$SCRIPT" -figcraft "$REF_OPTION" \
-            "-appname=$IN_APP" "-packagename=$IN_PKG" \
-            2>&1 | tee logs/runner-build.log
-          RC=${PIPESTATUS[0]}
-          set -e
+          run_builder() {
+            set +e
+            bash "$SCRIPT" -figcraft "$REF_OPTION" \
+              "-appname=$IN_APP" "-packagename=$IN_PKG" \
+              2>&1 | tee -a logs/runner-build.log
+            RC=${PIPESTATUS[0]}
+            set -e
+          }
 
-          echo "Builder exit code: $RC"
+          run_builder
+          echo "Builder exit code (attempt 1): $RC"
+
+          # Auto-fix: launcher yang dibuat builder mengisi prefs.ui_scale, tetapi
+          # FigCraft versi lama (mis. v0.5.1) belum punya field itu. Baris tsb
+          # dibuang lalu build diulang; builder memakai ulang checkout dan
+          # launcher yang sudah ada.
+          LAUNCHER="source/figcraft/apps/figcraft-android/src/lib.rs"
+          if [ "$RC" -ne 0 ] \
+             && [ -f "$LAUNCHER" ] \
+             && grep -q -F 'no field `ui_scale` on type `Prefs`' logs/runner-build.log; then
+            echo "::warning::Auto-fix: menghapus penetapan prefs.ui_scale dari launcher"
+            sed -i -E 's|inner\.session\.prefs\.ui_scale[[:space:]]*=[[:space:]]*[^;]+;|/* ui_scale tidak ada di versi ini */|' "$LAUNCHER"
+            grep -n "ui_scale" "$LAUNCHER" || echo "(tidak ada sisa ui_scale)"
+            run_builder
+            echo "Builder exit code (attempt 2): $RC"
+          fi
+
           exit "$RC"
 
       # Menampilkan ERROR PERTAMA, bukan 250 baris terakhir
