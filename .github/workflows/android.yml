@@ -94,6 +94,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Wajib: builder memakai Pillow untuk membuat ikon launcher Android.
+      - name: Install Python dependencies (Pillow)
+        shell: bash
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pillow
+          python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
       - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
