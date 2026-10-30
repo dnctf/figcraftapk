@@ -1,215 +1,74 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FigCraft Android APK Release</title>
-    <style>
-        :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
-            --text-color: #e2e8f0;
-            --text-muted: #94a3b8;
-            --accent-color: #38bdf8;
-            --accent-hover: #0ea5e9;
-            --border-color: #334155;
-            --code-bg: #090d16;
-        }
+<p align="center">
+  <a href="https://getartcraft.com/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/storytold/vectorcraft/main/docs/brand/artcraft-logo-white.png">
+      <img alt="ArtCraft" src="https://raw.githubusercontent.com/storytold/vectorcraft/main/docs/brand/artcraft-logo.png" width="200">
+    </picture>
+  </a>
+</p>
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+<p align="center">
+  <img src="assets/app-icon/hicolor/256x256/apps/ai.storyteller.figcraft.png" width="128" height="128" alt="FigCraft Android APK icon">
+</p>
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            line-height: 1.6;
-            padding: 2rem 1rem;
-        }
+<h1 align="center">FigCraft Android APK Release</h1>
 
-        .container {
-            max-width: 850px;
-            margin: 0 auto;
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 2.5rem;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-        }
+<p align="center">
+  <b>Interface design and prototyping: Android porting and standalone build.</b><br>
+  Bringing Rust-powered design, layout, and prototyping capabilities to Android mobile and tablet devices.
+</p>
 
-        header {
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 1.5rem;
-            margin-bottom: 2rem;
-            text-align: center;
-        }
+<p align="center">
+  <img alt="100% Rust" src="https://img.shields.io/badge/100%25-Rust-b7410e?style=flat-square&logo=rust">
+  <img alt="Platform: Android" src="https://img.shields.io/badge/Platform-Android-38bdf8?style=flat-square&logo=android">
+  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-3a3a3a?style=flat-square">
+  <img alt="Status: Release" src="https://img.shields.io/badge/status-release-d69e2e?style=flat-square">
+</p>
 
-        h1 {
-            font-size: 2.25rem;
-            color: #f8fafc;
-            margin-bottom: 0.5rem;
-        }
+<p align="center">
+  <a href="https://github.com/storytold/figcraft/releases"><b>Download Latest APK from Releases</b></a>
+</p>
 
-        .badge {
-            display: inline-block;
-            background-color: rgba(56, 189, 248, 0.1);
-            color: var(--accent-color);
-            border: 1px solid rgba(56, 189, 248, 0.2);
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-size: 0.875rem;
-            font-weight: 600;
-            margin-top: 0.5rem;
-        }
+<br>
 
-        h2 {
-            font-size: 1.5rem;
-            color: #f8fafc;
-            margin-top: 2rem;
-            margin-bottom: 1rem;
-            padding-bottom: 0.3rem;
-            border-bottom: 1px solid var(--border-color);
-        }
+> [!NOTE]
+> **Android Porting Repository.** This repository adapts the upstream <a href="https://github.com/storytold/figcraft"><b>FigCraft</b></a> project[cite: 11] to support compilation and execution on Android mobile environments. Structured and assisted with **Claude AI**.
 
-        h3 {
-            font-size: 1.15rem;
-            color: #cbd5e1;
-            margin-top: 1.25rem;
-            margin-bottom: 0.5rem;
-        }
+<p align="center">
+  <a href="#about-the-project">About</a> ·
+  <a href="#credits--upstream-attribution">Credits</a> ·
+  <a href="#porting-methodology">Methodology</a> ·
+  <a href="#installation-guide">Installation</a>
+</p>
 
-        p, ul {
-            margin-bottom: 1rem;
-            color: var(--text-muted);
-        }
+<br>
 
-        ul {
-            padding-left: 1.5rem;
-        }
+## About the Project
 
-        li {
-            margin-bottom: 0.5rem;
-        }
+This repository hosts independent Android APK builds and porting configurations for **FigCraft**. It is customized to ensure responsive touch interactions, optimized memory management, and smooth rendering across various Android screen sizes and architectures.
 
-        a {
-            color: var(--accent-color);
-            text-decoration: none;
-        }
+## Credits & Upstream Attribution
 
-        a:hover {
-            text-decoration: underline;
-            color: var(--accent-hover);
-        }
+We extend our sincere gratitude to the original creators and maintainers for their incredible open-source work:
 
-        .btn-container {
-            margin: 1.5rem 0;
-            text-align: center;
-        }
+* **Upstream Repository:** [github.com/storytold/figcraft](https://github.com/storytold/figcraft)[cite: 11]
+* **Original Authors & Community:** The ArtCraft Team and FigCraft Contributors[cite: 11].
+* **License:** Licensed under the original terms of **MIT OR Apache-2.0**[cite: 11].
 
-        .btn {
-            display: inline-block;
-            background-color: var(--accent-color);
-            color: #0f172a;
-            font-weight: 700;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            transition: background-color 0.2s, transform 0.1s;
-            text-decoration: none;
-        }
+## Porting Methodology
 
-        .btn:hover {
-            background-color: var(--accent-hover);
-            transform: translateY(-2px);
-            text-decoration: none;
-            color: #0f172a;
-        }
+* **Touch Interface Adaptation:** Reconfiguring interactive UI components to natively respond to touch gestures on mobile and tablet displays.
+* **Resource Optimization:** Tailoring memory heap allocations and garbage collection limits for stable performance under mobile hardware constraints.
+* **Build Pipeline:** Setting up cross-compilation scripts to streamline standalone APK releases directly from the source code.
 
-        code {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            background-color: var(--code-bg);
-            color: #e2e8f0;
-            padding: 0.2rem 0.4rem;
-            border-radius: 4px;
-            font-size: 0.9em;
-            border: 1px solid var(--border-color);
-        }
+## Installation Guide
 
-        pre {
-            background-color: var(--code-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 1rem;
-            overflow-x: auto;
-            margin-bottom: 1.5rem;
-        }
+1. Download the latest `.apk` package from the [GitHub Releases](https://github.com/storytold/figcraft/releases) page[cite: 11].
+2. Enable installation from unknown sources in your Android device's security settings.
+3. Install the APK and enjoy running the app on your mobile device.
 
-        pre code {
-            background-color: transparent;
-            border: none;
-            padding: 0;
-        }
+---
 
-        footer {
-            margin-top: 3rem;
-            border-top: 1px solid var(--border-color);
-            padding-top: 1.5rem;
-            text-align: center;
-            font-size: 0.875rem;
-            color: var(--text-muted);
-        }
-    </style>
-</head>
-<body>
-
-    <div class="container">
-        <header>
-            <h1>FigCraft Android APK</h1>
-            <p>Porting seluler dan rilis build mandiri untuk platform Android</p>
-            <span class="badge">v1.0.0-release</span>
-        </header>
-
-        <section>
-            <h2>Tentang Proyek Ini</h2>
-            <p>Repositori ini mendedikasikan build porting dan rilis file APK Android untuk aplikasi <strong>FigCraft</strong>. Proyek ini diadaptasi dan dioptimalkan agar dapat berjalan mulus pada ekosistem perangkat seluler, termasuk tablet dan perangkat sentuh lainnya.</p>
-            
-            <div class="btn-container">
-                <a href="#" class="btn">Unduh APK Terbaru</a>
-            </div>
-        </section>
-
-        <section>
-            <h2>Atribusi & Sumber Asli</h2>
-            <p>Proyek ini dibangun di atas fondasi kode sumber terbuka dari repositori hulu (upstream). Kami menjunjung tinggi apresiasi kepada para pengembang original atas kontribusi luar biasa mereka pada proyek utama.</p>
-            <ul>
-                <li><strong>Repositori Hulu:</strong> <a href="https://github.com/org/figcraft" target="_blank">github.com/org/figcraft</a></li>
-                <li><strong>Lisensi:</strong> Mengikuti ketentuan lisensi dari repositori asli.</li>
-            </ul>
-        </section>
-
-        <section>
-            <h2>Metodologi Porting & Penyesuaian</h2>
-            <p>Proses adaptasi dan kompilasi APK ini melibatkan beberapa tahapan optimasi khusus:</p>
-            <ul>
-                <li><strong>Penyesuaian Antarmuka Sentuh:</strong> Mengonfigurasi ulang elemen interaktif agar responsif terhadap navigasi sentuh layar perangkat seluler.</li>
-                <li><strong>Manajemen Memori:</strong> Mengoptimalkan batas alokasi heap dan pembuangan sampah memori agar stabil di berbagai spesifikasi hardware Android.</li>
-                <li><strong>Build Pipeline:</strong> Menggunakan skrip otomatisasi untuk kompilasi silang (cross-compilation) langsung dari kode sumber terbaru.</li>
-            </ul>
-        </section>
-
-        <section>
-            <h2>Panduan Instalasi Cepat</h2>
-            <p>Pastikan perangkat Anda mengizinkan instalasi dari sumber tidak dikenal sebelum memasang file APK.</p>
-            <pre><code># Langkah verifikasi checksum file APK (opsional)
-sha256sum FigCraft-v1.0.0.apk</code></pre>
-        </section>
-
-        <footer>
-            <p>&copy; 2026 FigCraft Android Porting Project. Dibuat dengan format yang bersih dan responsif.</p>
-        </footer>
-    </div>
-
-</body>
-</html>
+<p align="center">
+  <sub>Independent Android port based on <a href="https://github.com/storytold/figcraft">FigCraft</a> by the ArtCraft Team[cite: 11]. Assisted by Claude AI.</sub>
+</p>
