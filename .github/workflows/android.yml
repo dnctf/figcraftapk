@@ -529,119 +529,171 @@ jobs:
       # BUILD
       # ========================================================
 
-      - name: Build FigCraft Android
-        id: build
-        working-directory: android-builder
-        env:
-          FIGCRAFT_REPO_URL: https://github.com/${{ github.repository }}.git
-          FIGCRAFT_APP_ORIGIN: https://github.com/${{ github.repository }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
+     - name: Build FigCraft Android
+  id: build
+  working-directory: android-builder
+  env:
+    FIGCRAFT_REPO_URL: https://github.com/${{ github.repository }}.git
+    FIGCRAFT_APP_ORIGIN: https://github.com/${{ github.repository }}
+    ARTCRAFT_TARGET_SDK: ${{ env.ANDROID_API }}
+    ARTCRAFT_NDK_VERSION: ${{ env.ANDROID_NDK }}
+    ARTCRAFT_BUILD_TOOLS_VERSION: ${{ env.ANDROID_BUILD_TOOLS }}
+  shell: bash
+  run: |
+    set -Eeuo pipefail
 
-          mkdir -p logs
-          mkdir -p output
+    mkdir -p logs
+    mkdir -p output
 
-          LOG_FILE="logs/figcraft-build.log"
+    LOG_FILE="$PWD/logs/figcraft-build.log"
 
-          echo "=============================================="
-          echo "FIGCRAFT ANDROID BUILD"
-          echo "=============================================="
+    REF="${{ inputs.source_ref }}"
 
-          echo "Repository:"
-          echo "$FIGCRAFT_REPO_URL"
+    if [ -z "$REF" ]; then
+      REF="main"
+    fi
 
-          echo
-          echo "Application:"
-          echo "${{ inputs.app_name }}"
+    echo "=============================================="
+    echo "FIGCRAFT ANDROID BUILD"
+    echo "=============================================="
 
-          echo
-          echo "Package:"
-          echo "${{ inputs.package_name }}"
+    echo "Repository:"
+    echo "$FIGCRAFT_REPO_URL"
 
-          echo
-          echo "Mode:"
-          echo "${{ inputs.build_mode }}"
+    echo
+    echo "Origin:"
+    echo "$FIGCRAFT_APP_ORIGIN"
 
-          echo
-          echo "Source ref:"
-          echo "${{ inputs.source_ref }}"
+    echo
+    echo "Ref:"
+    echo "$REF"
 
-          echo
-          echo "=============================================="
+    echo
+    echo "Application:"
+    echo "${{ inputs.app_name }}"
 
-          REF="${{ inputs.source_ref }}"
+    echo
+    echo "Package:"
+    echo "${{ inputs.package_name }}"
 
-          if [ -z "$REF" ]; then
-            REF="main"
-          fi
+    echo
+    echo "Mode:"
+    echo "${{ inputs.build_mode }}"
 
-          if [ "$REF" = "main" ]; then
-            REF_OPTION="-main"
+    echo
+    echo "=============================================="
 
-          elif [ "$REF" = "stable" ]; then
-            REF_OPTION="-stable"
+    # ----------------------------------------------------------
+    # Verify the patched builder before starting.
+    # ----------------------------------------------------------
 
-          else
-            REF_OPTION="-branch=$REF"
-          fi
+    echo
+    echo "Builder repository configuration:"
 
-          echo "Resolved builder ref option:"
-          echo "$REF_OPTION"
+    grep -n \
+      -E '^REPO=|^APP_ORIGIN=' \
+      lib/build-common.sh
 
-          echo
-          echo "Starting builder..."
+    # ----------------------------------------------------------
+    # Clean only builder-generated source/output.
+    #
+    # This is safe on GitHub Actions because this is a fresh
+    # runner. It also prevents a stale checkout from being reused.
+    # ----------------------------------------------------------
 
-          set +e
+    rm -rf source/figcraft
+    rm -rf source/.clone-figcraft.*
+    rm -rf output/*
+    rm -rf build/figcraft
 
-          if [ "${{ inputs.build_mode }}" = "debug" ]; then
+    mkdir -p source output logs
 
-            chmod +x build-debug.sh
+    # ----------------------------------------------------------
+    # Resolve source ref.
+    # ----------------------------------------------------------
 
-            ./build-debug.sh \
-              -figcraft \
-              "$REF_OPTION" \
-              "-appname=${{ inputs.app_name }}" \
-              "-packagename=${{ inputs.package_name }}" \
-              2>&1 | tee "$LOG_FILE"
+    if [ "$REF" = "main" ]; then
 
-          else
+      REF_OPTION="-main"
 
-            chmod +x build.sh
+    elif [ "$REF" = "stable" ]; then
 
-            ./build.sh \
-              -figcraft \
-              "$REF_OPTION" \
-              "-appname=${{ inputs.app_name }}" \
-              "-packagename=${{ inputs.package_name }}" \
-              2>&1 | tee "$LOG_FILE"
+      REF_OPTION="-stable"
 
-          fi
+    else
 
-          BUILD_EXIT=${PIPESTATUS[0]}
+      REF_OPTION="-branch=$REF"
 
-          set -e
+    fi
 
-          echo
-          echo "Builder exit code:"
-          echo "$BUILD_EXIT"
+    echo
+    echo "Builder source option:"
+    echo "$REF_OPTION"
 
-          if [ "$BUILD_EXIT" -ne 0 ]; then
-            echo
-            echo "=============================================="
-            echo "BUILD FAILED"
-            echo "=============================================="
+    # ----------------------------------------------------------
+    # Run builder.
+    # ----------------------------------------------------------
 
-            echo
-            echo "Last 200 lines of build log:"
-            tail -n 200 "$LOG_FILE" || true
+    set +e
 
-            exit "$BUILD_EXIT"
-          fi
+    if [ "${{ inputs.build_mode }}" = "debug" ]; then
 
-          echo
-          echo "Builder completed successfully."
+      chmod +x build-debug.sh
 
+      ./build-debug.sh \
+        -figcraft \
+        "$REF_OPTION" \
+        "-appname=${{ inputs.app_name }}" \
+        "-packagename=${{ inputs.package_name }}" \
+        2>&1 | tee "$LOG_FILE"
+
+    else
+
+      chmod +x build.sh
+
+      ./build.sh \
+        -figcraft \
+        "$REF_OPTION" \
+        "-appname=${{ inputs.app_name }}" \
+        "-packagename=${{ inputs.package_name }}" \
+        2>&1 | tee "$LOG_FILE"
+
+    fi
+
+    BUILD_EXIT=${PIPESTATUS[0]}
+
+    set -e
+
+    echo
+    echo "Builder exit code: $BUILD_EXIT"
+
+    if [ "$BUILD_EXIT" -ne 0 ]; then
+
+      echo
+      echo "=============================================="
+      echo "BUILD FAILED"
+      echo "=============================================="
+
+      echo
+      echo "Last 250 lines:"
+      tail -n 250 "$LOG_FILE" || true
+
+      exit "$BUILD_EXIT"
+    fi
+
+    echo
+    echo "=============================================="
+    echo "BUILDER COMPLETED"
+    echo "=============================================="
+
+    echo
+    echo "Generated APK candidates:"
+
+    find . \
+      -type f \
+      -name "*.apk" \
+      -print \
+      || true
       # ========================================================
       # INSPECT OUTPUT
       # ========================================================
